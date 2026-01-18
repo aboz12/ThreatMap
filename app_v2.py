@@ -358,7 +358,7 @@ async def api_auth_logout(request):
 
 async def broadcast_attack(attack: dict):
     """Broadcast attack to all WebSocket clients"""
-    message = json.dumps({"action": "attack", "data": attack})
+    message = json.dumps({"type": "attack", "data": attack})
     dead_clients = set()
 
     for ws in websocket_clients:
@@ -373,6 +373,15 @@ async def broadcast_attack(attack: dict):
 async def process_attack(attack: dict):
     """Process an attack through all systems"""
     global attack_history
+
+    # Add color based on severity
+    severity_colors = {
+        "critical": "#ff0000",
+        "high": "#ff8800",
+        "medium": "#ffff00",
+        "low": "#00ff00"
+    }
+    attack["color"] = severity_colors.get(attack.get("severity", "medium"), "#ffff00")
 
     # Save to history
     attack_history.append(attack)
