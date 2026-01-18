@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Threat Map - Real-Time Cyber Attack Visualization</title>
+    <script src="https://unpkg.com/globe.gl@2.27.0/dist/globe.gl.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg-primary: #0a0a1a;
+            --bg-secondary: rgba(10, 20, 40, 0.9);
+            --accent: #00c8ff;
+            --danger: #ff4444;
+            --warning: #ffaa00;
+            --success: #00ff88;
+            --text-primary: #fff;
+            --text-secondary: #888;
+            --border: rgba(0, 200, 255, 0.3);
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        #globe-container, #map-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        #map-container { display: none; background: #1a1a2e; }
+
+        .overlay {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .overlay > * { pointer-events: auto; }
+
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+            padding: 15px;
+        }
+
+        /* Header */
+        .header {
+            top: 0; left: 0; right: 0;
+            padding: 15px 25px;
+            background: linear-gradient(180deg, rgba(10,10,26,0.95) 0%, transparent 100%);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .title {
+            font-size: 22px;
+            font-weight: 600;
+            text-shadow: 0 0 20px rgba(0, 200, 255, 0.5);
+        }
+
+        .title span { color: var(--accent); }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .feed-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            background: rgba(0, 255, 0, 0.1);
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            border-radius: 15px;
+            font-size: 12px;
+            color: #0f0;
+        }
+
+        .live-dot {
+            width: 8px; height: 8px;
+            background: #0f0;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 8px #0f0; }
+            50% { opacity: 0.5; }
+        }
+
+        .view-toggle {
+            display: flex;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .view-toggle button {
+            padding: 6px 15px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .view-toggle button.active {
+            background: var(--accent);
+            color: #000;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 10px;
+        }
+
+        .tab {
+            padding: 6px 12px;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .tab:hover { background: rgba(255,255,255,0.05); }
+        .tab.active {
+            background: rgba(0, 200, 255, 0.1);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* Left Panel - Stats & Filters */
+        .left-panel {
+            top: 70px; left: 15px;
+            width: 300px;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .stat-label { color: var(--text-secondary); font-size: 13px; }
+        .stat-value { font-size: 16px; font-weight: 600; color: var(--accent); }
+        .stat-value.critical { color: var(--danger); }
+
+        /* Charts */
+        .chart-container {
+            height: 150px;
+            margin: 10px 0;
+        }
+
+        /* Filters */
+        .filter-section { margin-top: 15px; }
+
+        .filter-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .filter-row select, .filter-row input {
+            flex: 1;
+            padding: 6px 10px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 12px;
+        }
+
+        .filter-row select:focus, .filter-row input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .btn {
+            padding: 6px 12px;
+            background: var(--accent);
+            border: none;
+            border-radius: 6px;
+            color: #000;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn:hover { opacity: 0.8; }
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        /* Right Panel - Feed */
+        .right-panel {
+            top: 70px; right: 15px;
+            width: 380px;
+            max-height: calc(100vh - 100px);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .feed-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 5px;
+        }
+
+        .feed-list::-webkit-scrollbar { width: 5px; }
+        .feed-list::-webkit-scrollbar-track { background: transparent; }
+        .feed-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .attack-item {
+            background: rgba(255,255,255,0.02);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 6px;
+            border-left: 3px solid var(--attack-color);
+            animation: slideIn 0.3s ease;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .attack-item:hover { background: rgba(255,255,255,0.05); }
+        .attack-item.honeypot { border-left-color: #ff0 !important; background: rgba(255,255,0,0.05); }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .attack-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .attack-type { font-weight: 600; font-size: 12px; color: var(--attack-color); }
+
+        .severity-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .severity-critical { background: rgba(255,0,0,0.2); color: #ff4444; }
+        .severity-high { background: rgba(255,136,0,0.2); color: #ff8800; }
+        .severity-medium { background: rgba(255,255,0,0.2); color: #ffff00; }
+
+        .attack-route { font-size: 11px; color: var(--text-secondary); }
+        .attack-route .arrow { color: var(--attack-color); margin: 0 5px; }
+        .attack-details { font-size: 10px; color: #666; margin-top: 4px; }
+
+        /* Alert toast */
+        .alert-toast {
+            position: fixed;
+            top: 80px; left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 25px;
+            background: var(--danger);
+            border-radius: 8px;
+            font-weight: 600;
+            z-index: 100;
+            display: none;
+            animation: alertPulse 0.5s ease;
+        }
+
+        @keyframes alertPulse {
+            0%, 100% { transform: translateX(-50%) scale(1); }
+            50% { transform: translateX(-50%) scale(1.05); }
+        }
+
+        .alert-toast.show { display: block; }
+
+        /* Bottom Panel - Blocklist & Actors */
+        .bottom-panel {
+            bottom: 15px; left: 15px; right: 15px;
+            height: 180px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .bottom-panel .panel { flex: 1; overflow: hidden; }
+
+        .panel-title {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* IP Detail Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 200;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.show { display: flex; }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .info-item {
+            background: rgba(255,255,255,0.03);
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .info-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; }
+        .info-value { font-size: 14px; margin-top: 3px; }
+
+        /* Legend */
+        .legend-panel {
+            bottom: 210px; left: 15px;
+            width: 200px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            font-size: 11px;
+        }
+
+        .legend-color {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            box-shadow: 0 0 6px currentColor;
+        }
+
+        .legend-count { margin-left: auto; color: #666; }
+
+        /* Sound toggle */
+        .sound-toggle {
+            padding: 6px 12px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .sound-toggle.active { background: var(--accent); color: #000; }
+    </style>
+</head>
+<body>
+    <div id="globe-container"></div>
+    <div id="map-container"></div>
+
+    <!-- Header -->
+    <div class="overlay header">
+        <div class="title">Cyber <span>Threat</span> Map</div>
+        <div class="header-controls">
+            <div class="feed-badge">
+                <div class="live-dot"></div>
+                <span>LIVE</span>
+                <span id="threat-count">0</span>
+                <span>IPs</span>
+            </div>
+            <div class="view-toggle">
+                <button class="active" onclick="setView('globe')">3D Globe</button>
+                <button onclick="setView('map')">2D Map</button>
+            </div>
+            <button class="sound-toggle" id="sound-toggle" onclick="toggleSound()">🔊 Sound</button>
+        </div>
+    </div>
+
+    <!-- Left Panel -->
+    <div class="overlay left-panel panel">
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('stats')">Stats</button>
+            <button class="tab" onclick="showTab('filters')">Filters</button>
+            <button class="tab" onclick="showTab('alerts')">Alerts</button>
+        </div>
+
+        <div id="tab-stats" class="tab-content">
+            <div class="stat-row">
+                <span class="stat-label">Total Attacks</span>
+                <span class="stat-value" id="total-attacks">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Attacks/Second</span>
+                <span class="stat-value" id="attacks-per-sec">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Critical Threats</span>
+                <span class="stat-value critical" id="critical-count">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Honeypot Captures</span>
+                <span class="stat-value" id="honeypot-count">0</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Blocked IPs</span>
+                <span class="stat-value" id="blocked-count">0</span>
+            </div>
+
+            <div class="chart-container">
+                <canvas id="attackChart"></canvas>
+            </div>
+        </div>
+
+        <div id="tab-filters" class="tab-content" style="display:none;">
+            <div class="filter-section">
+                <div class="filter-row">
+                    <select id="filter-type">
+                        <option value="">All Types</option>
+                        <option value="Malware">Malware</option>
+                        <option value="Botnet">Botnet</option>
+                        <option value="Brute Force">Brute Force</option>
+                        <option value="SQL Injection">SQL Injection</option>
+                        <option value="Scanner">Scanner</option>
+                    </select>
+                </div>
+                <div class="filter-row">
+                    <select id="filter-severity">
+                        <option value="">All Severities</option>
+                        <option value="critical">Critical</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                    </select>
+                </div>
+                <div class="filter-row">
+                    <input type="text" id="filter-ip" placeholder="Search IP...">
+                </div>
+                <div class="filter-row">
+                    <input type="text" id="filter-country" placeholder="Country...">
+                </div>
+                <div class="filter-row">
+                    <button class="btn" onclick="applyFilters()">Apply</button>
+                    <button class="btn btn-secondary" onclick="clearFilters()">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-alerts" class="tab-content" style="display:none;">
+            <div id="alert-rules"></div>
+        </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="overlay legend-panel panel">
+        <div class="panel-title">Threat Types</div>
+        <div id="legend-items"></div>
+    </div>
+
+    <!-- Right Panel - Feed -->
+    <div class="overlay right-panel panel">
+        <div class="panel-title">
+            Live Attack Feed
+            <span id="feed-count">0</span>
+        </div>
+        <div class="feed-list" id="attack-feed"></div>
+    </div>
+
+    <!-- Bottom Panels -->
+    <div class="overlay bottom-panel">
+        <div class="panel">
+            <div class="panel-title">
+                Top Attackers
+                <button class="btn btn-secondary" onclick="exportBlocklist()">Export Blocklist</button>
+            </div>
+            <div id="top-attackers"></div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">Top Countries</div>
+            <div id="top-countries"></div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">Threat Actors</div>
+            <div id="threat-actors"></div>
+        </div>
+    </div>
+
+    <!-- Alert Toast -->
+    <div class="alert-toast" id="alert-toast">🚨 Alert</div>
+
+    <!-- IP Detail Modal -->
+    <div class="modal-overlay" id="ip-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>IP Details</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="ip-details"></div>
+        </div>
+    </div>
+
+    <!-- Audio for alerts -->
+    <audio id="alert-sound" src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH6LkpWTi4J5b2VgX2RteoaRmJyZko2Ef3VsZWJjaXOAjJeanZqUjoeDfHRtaGVmanuIlJyem5WQi4V+d3FsaGdqc4CMl52dnJePioaCfHZwbGlpbniFlpyfnpqVkIuFgHp0b2tqbHN+ipacn52ak5CKhYF7dnFtbG1xeYWRmZ2dnJiTjoqFgHt2cm5tbXF5hZGZnZ2cmJOOioWAe3ZybW1tcXmFkZmdnZyYk46KhYB7dnJtbW1xeYWRmZ2dnJiTjoqFgHt2cm1tbXF5hZGZnZ2cmJOOioWAe3ZybW1t"></audio>
+
+    <script>
+        // State
+        let globe, map, leafletArcs = [];
+        let currentView = 'globe';
+        let soundEnabled = false;
+        let ws;
+        let stats = { total_attacks: 0, attacks_by_type: {} };
+        let threatTypes = {};
+        let arcs = [], points = [];
+        let attacksLastSecond = 0;
+        let lastSecondTimestamp = Date.now();
+        let filters = {};
+        let attackChart;
+        let honeypotCount = 0;
+
+        // Initialize Globe
+        globe = Globe()
+            .globeImageUrl('https://unpkg.com/three-globe@2.27.0/example/img/earth-blue-marble.jpg')
+            .bumpImageUrl('https://unpkg.com/three-globe@2.27.0/example/img/earth-topology.png')
+            .backgroundImageUrl('https://unpkg.com/three-globe@2.27.0/example/img/night-sky.png')
+            .showAtmosphere(true)
+            .atmosphereColor('#3a228a')
+            .atmosphereAltitude(0.25)
+            .arcsData([])
+            .arcColor(d => d.color)
+            .arcAltitude(d => d.altitude || 0.1)
+            .arcStroke(d => d.stroke || 0.5)
+            .arcDashLength(0.4)
+            .arcDashGap(0.2)
+            .arcDashAnimateTime(1500)
+            .pointsData([])
+            .pointColor(d => d.color)
+            .pointAltitude(0.01)
+            .pointRadius(d => d.size || 0.3)
+            (document.getElementById('globe-container'));
+
+        globe.controls().autoRotate = true;
+        globe.controls().autoRotateSpeed = 0.3;
+        globe.pointOfView({ lat: 20, lng: 0, altitude: 2.5 });
+
+        // Initialize Leaflet Map
+        map = L.map('map-container', { zoomControl: false }).setView([20, 0], 2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+
+        // Initialize Chart
+        const ctx = document.getElementById('attackChart').getContext('2d');
+        attackChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Attacks',
+                    data: [],
+                    borderColor: '#00c8ff',
+                    backgroundColor: 'rgba(0, 200, 255, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { display: false },
+                    y: { display: false }
+                }
+            }
+        });
+
+        // WebSocket Connection
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+
+            ws.onopen = () => console.log('Connected');
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+
+                if (msg.type === 'init') {
+                    stats = msg.stats;
+                    threatTypes = msg.threat_types;
+                    initLegend();
+                    msg.recent_attacks.forEach(a => addAttack(a, false));
+                    updateStats();
+                    if (msg.db_stats) {
+                        document.getElementById('blocked-count').textContent = msg.db_stats.blocked_ips || 0;
+                    }
+                    document.getElementById('threat-count').textContent = (msg.stats.threat_ips_loaded || 0).toLocaleString();
+                    if (msg.alert_rules) renderAlertRules(msg.alert_rules);
+                    fetchTopData();
+                } else if (msg.type === 'attack') {
+                    addAttack(msg.data, true);
+                    if (msg.alerts && msg.alerts.length > 0) {
+                        showAlert(msg.alerts[0]);
+                    }
+                } else if (msg.type === 'alert') {
+                    showAlert(msg.data);
+                }
+            };
+
+            ws.onclose = () => setTimeout(connect, 3000);
+        }
+
+        function initLegend() {
+            const container = document.getElementById('legend-items');
+            container.innerHTML = Object.entries(threatTypes).map(([type, info]) => `
+                <div class="legend-item">
+                    <div class="legend-color" style="background:${info.color};color:${info.color}"></div>
+                    <span>${type}</span>
+                    <span class="legend-count" id="legend-${type.replace(/\s+/g, '-')}">0</span>
+                </div>
+            `).join('');
+        }
+
+        function addAttack(attack, animate = true) {
+            stats.total_attacks++;
+            stats.attacks_by_type[attack.type] = (stats.attacks_by_type[attack.type] || 0) + 1;
+            attacksLastSecond++;
+
+            if (attack.is_honeypot) honeypotCount++;
+
+            // Apply filters
+            if (filters.type && attack.type !== filters.type) return;
+            if (filters.severity && attack.severity !== filters.severity) return;
+            if (filters.ip && !attack.origin.ip.includes(filters.ip)) return;
+
+            // Add to visualization
+            const arc = {
+                startLat: attack.origin.lat,
+                startLng: attack.origin.lng,
+                endLat: attack.target.lat,
+                endLng: attack.target.lng,
+                color: attack.color,
+                altitude: 0.1 + Math.random() * 0.15,
+                stroke: attack.severity === 'critical' ? 1.5 : 0.5
+            };
+            arcs.push(arc);
+            if (arcs.length > 100) arcs = arcs.slice(-80);
+
+            if (currentView === 'globe') {
+                globe.arcsData(arcs);
+            } else {
+                addLeafletArc(attack);
+            }
+
+            addToFeed(attack);
+            updateStats();
+            updateChart();
+        }
+
+        function addLeafletArc(attack) {
+            if (attack.origin.lat && attack.target.lat) {
+                const line = L.polyline(
+                    [[attack.origin.lat, attack.origin.lng], [attack.target.lat, attack.target.lng]],
+                    { color: attack.color, weight: 2, opacity: 0.7 }
+                ).addTo(map);
+                leafletArcs.push(line);
+                if (leafletArcs.length > 50) {
+                    map.removeLayer(leafletArcs.shift());
+                }
+            }
+        }
+
+        function addToFeed(attack) {
+            const feed = document.getElementById('attack-feed');
+            const item = document.createElement('div');
+            item.className = 'attack-item' + (attack.is_honeypot ? ' honeypot' : '');
+            item.style.setProperty('--attack-color', attack.color);
+            item.onclick = () => showIPDetails(attack.origin.ip);
+
+            const honeypotBadge = attack.is_honeypot ? '<span style="color:#ff0;font-size:10px;">🍯 HONEYPOT</span>' : '';
+            const malwareInfo = attack.malware ? `<br><span style="color:#ff8800;font-size:10px;">${attack.malware}</span>` : '';
+
+            item.innerHTML = `
+                <div class="attack-header">
+                    <span class="attack-type">${attack.type}</span>
+                    <span class="severity-badge severity-${attack.severity}">${attack.severity}</span>
+                </div>
+                <div class="attack-route">
+                    ${attack.origin.city}, ${attack.origin.country}
+                    <span class="arrow">→</span>
+                    ${attack.target.city}
+                </div>
+                <div class="attack-details">
+                    ${attack.origin.ip} ${honeypotBadge}${malwareInfo}
+                </div>
+            `;
+
+            feed.insertBefore(item, feed.firstChild);
+            while (feed.children.length > 50) feed.removeChild(feed.lastChild);
+
+            document.getElementById('feed-count').textContent = feed.children.length;
+        }
+
+        function updateStats() {
+            document.getElementById('total-attacks').textContent = stats.total_attacks.toLocaleString();
+            document.getElementById('honeypot-count').textContent = honeypotCount;
+
+            const critical = (stats.attacks_by_type['Ransomware'] || 0) + (stats.attacks_by_type['APT'] || 0);
+            document.getElementById('critical-count').textContent = critical;
+
+            for (const [type, count] of Object.entries(stats.attacks_by_type)) {
+                const el = document.getElementById(`legend-${type.replace(/\s+/g, '-')}`);
+                if (el) el.textContent = count;
+            }
+        }
+
+        function updateChart() {
+            const now = new Date();
+            if (attackChart.data.labels.length > 30) {
+                attackChart.data.labels.shift();
+                attackChart.data.datasets[0].data.shift();
+            }
+            attackChart.data.labels.push(now.toLocaleTimeString());
+            attackChart.data.datasets[0].data.push(attacksLastSecond);
+            attackChart.update('none');
+        }
+
+        // View switching
+        function setView(view) {
+            currentView = view;
+            document.querySelectorAll('.view-toggle button').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+
+            if (view === 'globe') {
+                document.getElementById('globe-container').style.display = 'block';
+                document.getElementById('map-container').style.display = 'none';
+            } else {
+                document.getElementById('globe-container').style.display = 'none';
+                document.getElementById('map-container').style.display = 'block';
+                map.invalidateSize();
+            }
+        }
+
+        // Tabs
+        function showTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tab).style.display = 'block';
+        }
+
+        // Filters
+        function applyFilters() {
+            filters = {
+                type: document.getElementById('filter-type').value,
+                severity: document.getElementById('filter-severity').value,
+                ip: document.getElementById('filter-ip').value,
+                country: document.getElementById('filter-country').value
+            };
+        }
+
+        function clearFilters() {
+            filters = {};
+            document.getElementById('filter-type').value = '';
+            document.getElementById('filter-severity').value = '';
+            document.getElementById('filter-ip').value = '';
+            document.getElementById('filter-country').value = '';
+        }
+
+        // Alerts
+        function showAlert(alert) {
+            const toast = document.getElementById('alert-toast');
+            toast.textContent = `🚨 ${alert.rule_name || alert.message}`;
+            toast.classList.add('show');
+            if (soundEnabled) {
+                document.getElementById('alert-sound').play().catch(() => {});
+            }
+            setTimeout(() => toast.classList.remove('show'), 5000);
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const btn = document.getElementById('sound-toggle');
+            btn.classList.toggle('active', soundEnabled);
+            btn.textContent = soundEnabled ? '🔊 Sound ON' : '🔇 Sound OFF';
+        }
+
+        function renderAlertRules(rules) {
+            document.getElementById('alert-rules').innerHTML = rules.map(r => `
+                <div class="stat-row">
+                    <span class="stat-label">${r.name}</span>
+                    <label style="cursor:pointer;">
+                        <input type="checkbox" ${r.enabled ? 'checked' : ''}
+                               onchange="toggleAlert(${r.id}, this.checked)">
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        function toggleAlert(id, enabled) {
+            ws.send(JSON.stringify({ action: 'enable_alert', rule_id: id, enabled }));
+        }
+
+        // IP Details Modal
+        async function showIPDetails(ip) {
+            document.getElementById('ip-modal').classList.add('show');
+            document.getElementById('ip-details').innerHTML = '<p>Loading...</p>';
+
+            try {
+                const resp = await fetch(`/api/ip/${ip}`);
+                const data = await resp.json();
+
+                document.getElementById('ip-details').innerHTML = `
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="info-label">IP Address</div>
+                            <div class="info-value">${data.ip}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Location</div>
+                            <div class="info-value">${data.geo?.city}, ${data.geo?.country}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">ISP</div>
+                            <div class="info-value">${data.network?.isp || 'Unknown'}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">ASN</div>
+                            <div class="info-value">${data.network?.asn || 'Unknown'}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Reverse DNS</div>
+                            <div class="info-value">${data.network?.reverse_dns || 'N/A'}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Threat Score</div>
+                            <div class="info-value">${data.reputation?.threat_score || 0}/100</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Tor Exit</div>
+                            <div class="info-value">${data.reputation?.is_tor ? 'Yes' : 'No'}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">VPN/Proxy</div>
+                            <div class="info-value">${data.reputation?.is_vpn || data.reputation?.is_proxy ? 'Yes' : 'No'}</div>
+                        </div>
+                    </div>
+                `;
+            } catch (e) {
+                document.getElementById('ip-details').innerHTML = '<p>Error loading data</p>';
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('ip-modal').classList.remove('show');
+        }
+
+        // Export
+        function exportBlocklist() {
+            window.open('/api/blocklist?format=plain', '_blank');
+        }
+
+        // Fetch top data
+        async function fetchTopData() {
+            try {
+                const [attackers, countries, actors] = await Promise.all([
+                    fetch('/api/top-attackers?limit=5').then(r => r.json()),
+                    fetch('/api/top-countries?limit=5').then(r => r.json()),
+                    fetch('/api/threat-actors').then(r => r.json())
+                ]);
+
+                document.getElementById('top-attackers').innerHTML = attackers.map((a, i) => `
+                    <div class="stat-row" style="cursor:pointer" onclick="showIPDetails('${a.ip}')">
+                        <span class="stat-label">${i+1}. ${a.ip}</span>
+                        <span class="stat-value">${a.attack_count}</span>
+                    </div>
+                `).join('') || '<p style="color:#666;font-size:12px;">No data yet</p>';
+
+                document.getElementById('top-countries').innerHTML = countries.map((c, i) => `
+                    <div class="stat-row">
+                        <span class="stat-label">${i+1}. ${c.country}</span>
+                        <span class="stat-value">${c.count}</span>
+                    </div>
+                `).join('') || '<p style="color:#666;font-size:12px;">No data yet</p>';
+
+                document.getElementById('threat-actors').innerHTML = actors.slice(0, 4).map(a => `
+                    <div class="stat-row">
+                        <span class="stat-label" title="${a.description}">${a.name}</span>
+                        <span class="stat-value" style="font-size:10px;color:#666">${a.country}</span>
+                    </div>
+                `).join('');
+
+            } catch (e) {
+                console.error('Failed to fetch top data:', e);
+            }
+        }
+
+        // Update attacks per second
+        setInterval(() => {
+            const rate = Math.round(attacksLastSecond);
+            document.getElementById('attacks-per-sec').textContent = rate;
+            attacksLastSecond = 0;
+        }, 1000);
+
+        // Refresh top data periodically
+        setInterval(fetchTopData, 30000);
+
+        // Handle resize
+        window.addEventListener('resize', () => {
+            globe.width(window.innerWidth);
+            globe.height(window.innerHeight);
+        });
+
+        // Start
+        connect();
+    </script>
+</body>
+</html>

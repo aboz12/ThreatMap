@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  threatmap:
+    build: .
+    container_name: threatmap
+    ports:
+      - "8888:8888"   # Web interface
+      - "2222:2222"   # SSH honeypot
+      - "8080:8080"   # HTTP honeypot
+      - "2323:2323"   # Telnet honeypot
+    volumes:
+      - threatmap_data:/app/data
+      - ./threatmap.db:/app/threatmap.db
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/api/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  threatmap_data:
