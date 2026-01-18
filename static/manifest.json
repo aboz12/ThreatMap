@@ -1,0 +1,33 @@
+{
+  "name": "ThreatMap",
+  "short_name": "ThreatMap",
+  "description": "Real-time Internet Threat Visualization Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#00ff88",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["security", "utilities"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "View Dashboard",
+      "url": "/",
+      "description": "Open the main threat dashboard"
+    }
+  ]
+}
